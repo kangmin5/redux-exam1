@@ -1,35 +1,108 @@
-import { createSlice,nanoid } from "@reduxjs/toolkit"
+import { createSlice, nanoid, createAsyncThunk } from "@reduxjs/toolkit";
+import { sub } from 'date-fns';
+import axios from "axios";
 
+const POSTS_URL = 'https://jsonplaceholder.typicode.com/posts';
 
-const initialState = [
-    {
-        id: '1', title: '포스트 첫번째의 제목', content: `포스트 첫번째의 내용입니다. 내용을 테스트하기 위하여 길게 내용을 작성하고 있습니다.\
-    얼마나 길게 작성해야 할지 테스트용입니다.`},
-    {id:'2',title:'포스트 두번째의 제목', content:'포스트 두번째의 내용입니다.'}
-]
+const initialState = {
+    posts: [],
+    status: 'idle', //'idle' | 'loading' | 'succeeded' | 'failed'
+    error: null
+}
 
- const postsSlice = createSlice({
+export const fetchPosts = createAsyncThunk('posts/fetchPosts', async () => {
+    const response = await axios.get(POSTS_URL)
+    return response.data
+})
+
+export const addNewPost = createAsyncThunk('posts/addNewPost', async (initialPost) => {
+    const response = await axios.post(POSTS_URL, initialPost)
+    return response.data
+})
+
+const postsSlice = createSlice({
     name: 'posts',
     initialState,
     reducers: {
         postAdded: {
             reducer(state, action) {
-                state.push(action.payload)
+                state.posts.push(action.payload)
             },
-            prepare(title, content) {
+            prepare(title, content, userId) {
                 return {
                     payload: {
                         id: nanoid(),
                         title,
-                        content
+                        content,
+                        date: new Date().toISOString(),
+                        userId,
+                        reactions: {
+                            thumbsUp: 0,
+                            wow: 0,
+                            heart: 0,
+                            rocket: 0,
+                            coffee: 0
+                        }
                     }
                 }
-            }     
-             
+            }
+        },
+        reactionAdded(state, action) {
+            const { postId, reaction } = action.payload
+            const existingPost = state.posts.find(post => post.id === postId)
+            if (existingPost) {
+                existingPost.reactions[reaction]++
+            }
         }
-        
+    },
+    extraReducers(builder) {
+        builder
+            .addCase(fetchPosts.pending, (state, action) => {
+                state.status = 'loading'
+            })
+            .addCase(fetchPosts.fulfilled, (state, action) => {
+                state.status = 'succeeded'
+                // Adding date and reactions
+                let min = 1;
+                const loadedPosts = action.payload.map(post => {
+                    post.date = sub(new Date(), { minutes: min++ }).toISOString();
+                    post.reactions = {
+                        thumbsUp: 0,
+                        wow: 0,
+                        heart: 0,
+                        rocket: 0,
+                        coffee: 0
+                    }
+                    return post;
+                });
+
+                // Add any fetched posts to the array
+                state.posts = state.posts.concat(loadedPosts)
+            })
+            .addCase(fetchPosts.rejected, (state, action) => {
+                state.status = 'failed'
+                state.error = action.error.message
+            })
+            .addCase(addNewPost.fulfilled, (state, action) => {
+                action.payload.userId = Number(action.payload.userId)
+                action.payload.date = new Date().toISOString();
+                action.payload.reactions = {
+                    thumbsUp: 0,
+                    wow: 0,
+                    heart: 0,
+                    rocket: 0,
+                    coffee: 0
+                }
+                console.log(action.payload)
+                state.posts.push(action.payload)
+            })
     }
- })
-export const selectAllPosts = (state) => state.posts;
-export const {postAdded } = postsSlice.actions;
-export default postsSlice.reducer;
+})
+
+export const selectAllPosts = (state) => state.posts.posts;
+export const getPostsStatus = (state) => state.posts.status;
+export const getPostsError = (state) => state.posts.error;
+
+export const { postAdded, reactionAdded } = postsSlice.actions
+
+export default postsSlice.reducer
